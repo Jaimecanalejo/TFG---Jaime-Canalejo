@@ -9,7 +9,6 @@ def descargar_datos(ticker, inicio, fin, interval='1wk'):
         if datos.empty:
             return None
 
-        # --- NUEVO: SOLUCIÓN AL KEYERROR (Aplanar MultiIndex) ---
         # Si yfinance devuelve columnas dobles, nos quedamos solo con el nombre del indicador
         if isinstance(datos.columns, pd.MultiIndex):
             datos.columns = datos.columns.get_level_values(0)
