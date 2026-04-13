@@ -67,7 +67,7 @@ temporalidad = st.sidebar.selectbox("Selecciona Temporalidad:", options=["1 Hora
 fecha_inicio_sel = st.sidebar.date_input("Fecha de inicio", value=pd.to_datetime("2020-01-01"))
 
 # --- SECCIÓN CONDICIONAL: SENSIBILIDAD (Solo en modo Individual) ---
-sensibilidad_sma = 30 # Valor por defecto para cálculos internos
+sensibilidad_sma = 30 
 if modo_analisis == "Individual":
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 Filtro de Sensibilidad")
@@ -117,8 +117,20 @@ if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar
 
 # --- 4. RENDERIZADO ---
 if st.session_state.mostrar_screener and 'df_screener_result' in st.session_state:
-    st.markdown("# 🔍 Escáner Pro"); df_res = st.session_state.df_screener_result
-    st.dataframe(df_res.style.map(lambda v: f'background-color: {"#d4edda" if "2" in str(v) else "#f8d7da" if "4" in str(v) else "#fff3cd" if "3" in str(v) else "#e2e3e5"}', subset=['Etapa Actual']), use_container_width=True)
+    st.markdown("# 🔍 Escáner Pro")
+    df_res = st.session_state.df_screener_result
+    
+    def aplicar_colores_etapa(val):
+        color = "#e2e3e5" 
+        if "2" in str(val): color = "#d4edda" 
+        elif "4" in str(val): color = "#f8d7da" 
+        elif "3" in str(val): color = "#fff3cd" 
+        return f'background-color: {color}'
+
+    try:
+        st.dataframe(df_res.style.applymap(aplicar_colores_etapa, subset=['Etapa Actual']), use_container_width=True)
+    except:
+        st.dataframe(df_res, use_container_width=True)
 
 elif 'df1' in st.session_state:
     df1, t1, df2, t2 = st.session_state.df1, st.session_state.t1, st.session_state.get('df2'), st.session_state.get('t2')
