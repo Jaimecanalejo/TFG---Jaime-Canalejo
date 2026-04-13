@@ -21,6 +21,3 @@ def clasificar_etapa(row):
     # ETAPA 1 O 3: TRANSICIÓN (Suelo o Techo)
     else:
         return "Etapa 1/3: Consolidación o Cambio de tendencia"
-
-# Nota: En el siguiente paso haremos este análisis más complejo 
-# mirando la pendiente de la media móvil.
