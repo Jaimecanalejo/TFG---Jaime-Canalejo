@@ -7,8 +7,6 @@ def clasificar_etapa(row):
     sma = row['SMA_30']
     mansfield = row['Mansfield']
     
-    # Necesitamos comparar con la SMA de la semana anterior para saber la pendiente
-    # (Este cálculo lo haremos fuera de la función, aquí solo definimos la lógica)
     
     # ETAPA 2: ALCISTA (Lo que buscamos)
     if precio > sma and mansfield > 0:
