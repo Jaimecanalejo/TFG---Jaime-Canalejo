@@ -9,6 +9,7 @@ def descargar_datos(ticker, inicio, fin, interval='1wk'):
         if datos.empty:
             return None
 
+        # --- NUEVO: SOLUCIÓN AL KEYERROR (Aplanar MultiIndex) ---
         # Si yfinance devuelve columnas dobles, nos quedamos solo con el nombre del indicador
         if isinstance(datos.columns, pd.MultiIndex):
             datos.columns = datos.columns.get_level_values(0)
@@ -28,5 +29,4 @@ def descargar_datos(ticker, inicio, fin, interval='1wk'):
 def preparar_datos_semanales(df):
     if df is None:
         return None
-    # Tu lógica actual de resampling...
     return df.resample('W').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'})
