@@ -64,6 +64,15 @@ if modo_analisis == "Comparativa Multiactivo":
     ticker_2 = st.sidebar.text_input("Ticker Comparativo", value="MSFT").upper()
 
 temporalidad = st.sidebar.selectbox("Selecciona Temporalidad:", options=["1 Hora", "1 Día", "1 Semana"], index=2)
+
+# Limpieza de memoria si cambias de temporalidad para que no intente pintar gráficos viejos
+if 'last_temp' not in st.session_state:
+    st.session_state.last_temp = temporalidad
+if temporalidad != st.session_state.last_temp:
+    if 'df1' in st.session_state: del st.session_state.df1
+    if 'df2' in st.session_state: del st.session_state.df2
+    st.session_state.last_temp = temporalidad
+
 fecha_inicio_sel = st.sidebar.date_input("Fecha de inicio", value=pd.to_datetime("2020-01-01"))
 
 # --- SECCIÓN CONDICIONAL: SENSIBILIDAD (Solo en modo Individual) ---
@@ -96,10 +105,27 @@ if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar
     if boton_analizar:
         map_int = {"1 Hora": "60m", "1 Día": "1d", "1 Semana": "1wk"}
         interval = map_int[temporalidad]
+        
+        # Parche de seguridad para 1 Hora
+        fecha_descarga = fecha_inicio_sel
+        if interval == "60m":
+            limite_yahoo = pd.Timestamp.now().date() - pd.Timedelta(days=729)
+            if fecha_inicio_sel < limite_yahoo:
+                st.sidebar.warning(f"⚠️ Yahoo solo permite 2 años para 1h. Ajustado automáticamente.")
+                fecha_descarga = limite_yahoo
+
         with st.spinner(f'Descargando datos...'):
-            df1_raw = descargar_datos(ticker_1, str(fecha_inicio_sel), "2026-01-01", interval=interval)
-            df_mkt_raw = descargar_datos("^GSPC", str(fecha_inicio_sel), "2026-01-01", interval=interval)
-            df2_raw = descargar_datos(ticker_2, str(fecha_inicio_sel), "2026-01-01", interval=interval) if ticker_2 else None
+            df1_raw = descargar_datos(ticker_1, str(fecha_descarga), "2026-01-01", interval=interval)
+            df_mkt_raw = descargar_datos("^GSPC", str(fecha_descarga), "2026-01-01", interval=interval)
+            df2_raw = descargar_datos(ticker_2, str(fecha_descarga), "2026-01-01", interval=interval) if ticker_2 else None
+
+        # Control de errores y parada en seco si no hay datos
+        if df1_raw is None or df1_raw.empty:
+            st.error(f"❌ Error: El ticker '{ticker_1}' no es válido o no devuelve datos.")
+            st.stop()
+        if df_mkt_raw is None or df_mkt_raw.empty:
+            st.error("❌ Error al descargar datos de mercado (^GSPC). Revisa la conexión.")
+            st.stop()
 
         if df1_raw is not None and not df1_raw.empty:
             df1 = preparar_datos_semanales(df1_raw) if interval == "1wk" else df1_raw
@@ -108,7 +134,7 @@ if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar
             df1['Mansfield'] = calcular_fuerza_relativa(df1, df_mkt)
             st.session_state.df1 = clasificar_historico(df1)
             st.session_state.t1, st.session_state.temp_label, st.session_state.current_sma = ticker_1, temporalidad, sensibilidad_sma
-            if df2_raw is not None:
+            if df2_raw is not None and not df2_raw.empty:
                 df2 = preparar_datos_semanales(df2_raw) if interval == "1wk" else df2_raw
                 df2 = calcular_indicadores_individuales(df2, periodo_sma=sensibilidad_sma)
                 df2['Mansfield'] = calcular_fuerza_relativa(df2, df_mkt)
@@ -181,11 +207,24 @@ elif 'df1' in st.session_state:
                 else:
                     fig.add_trace(go.Scatter(x=df1.index, y=df1['Close'], name=t1, line=dict(width=1.5)), row=f, col=1)
                     fig.add_trace(go.Scatter(x=df2.index, y=df2['Close'], name=t2, line=dict(width=1.5, dash='dot')), row=f, col=1)
+                
                 if mostrar_sombreado:
+                    # OPTIMIZACIÓN CRÍTICA: Agrupar colores contiguos para no saturar al navegador en 1 Hora / 1 Día
+                    start_idx = 1
+                    current_color = ""
                     for i in range(1, len(df1)):
                         e = df1.iloc[i]['Etapa']
                         color = "rgba(0, 255, 0, 0.05)" if "2" in e else "rgba(255, 0, 0, 0.05)" if "4" in e else "rgba(255, 165, 0, 0.05)" if "3" in e else ""
-                        if color: fig.add_vrect(x0=df1.index[i-1], x1=df1.index[i], fillcolor=color, line_width=0, layer="below", row=f, col=1)
+                        
+                        if color != current_color:
+                            if current_color != "":
+                                fig.add_vrect(x0=df1.index[start_idx-1], x1=df1.index[i-1], fillcolor=current_color, line_width=0, layer="below", row=f, col=1)
+                            current_color = color
+                            start_idx = i
+                    # Último bloque
+                    if current_color != "":
+                        fig.add_vrect(x0=df1.index[start_idx-1], x1=df1.index[-1], fillcolor=current_color, line_width=0, layer="below", row=f, col=1)
+                
                 f += 1
             if ver_m:
                 fig.add_trace(go.Scatter(x=df1.index, y=df1['Mansfield'], name=f"MF {t1}", fill='tozeroy'), row=f, col=1)
