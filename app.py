@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -7,6 +8,19 @@ from indicators import calcular_indicadores_individuales, calcular_fuerza_relati
 from exporter import generar_pdf 
 from backtest_simple import ejecutar_backtest_desde_df 
 
+# --- LISTA DE TICKERS SUGERIDOS PARA BÚSQUEDA DINÁMICA ---
+TICKERS_SUGERIDOS = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "AVGO", "PEP", "COST",
+    "ADBE", "CSCO", "NFLX", "AMD", "CMCSA", "TMUS", "INTC", "INTU", "AMAT", "QCOM",
+    "TXN", "AMGN", "HON", "ISRG", "BKNG", "VRTX", "GILD", "SBUX", "MDLZ", "REGN",
+    "PANW", "SNPS", "VRSK", "MELI", "CDNS", "KLAC", "CSX", "MAR", "PYPL", "ORLY",
+    "ASML", "MNST", "ROP", "LRCX", "ADSK", "CTAS", "AEP", "PAYX", "PCAR", "DXCM",
+    "IDXX", "KDP", "CHTR", "MCHP", "CPRT", "LULU", "EXC", "MRVL", "AZN", "BKR",
+    "TEAM", "ADX", "WDAY", "GFS", "ODFL", "NXPI", "MRNA", "ABNB",
+    "DASH", "BIIB", "SGEN", "ZS", "DLTR", "FAST", "EA", "EBAY", "ANSS", "VRSN",
+    "JPM", "V", "MA", "UNH", "HD", "PG", "DIS", "JNJ", "WMT", "BAC", "XOM", "CVX"
+]
+
 # --- 1. LÓGICA DE CLASIFICACIÓN DE ETAPAS (ALGORITMO WEINSTEIN) ---
 def clasificar_historico(df):
     """Clasifica cada vela en una de las 4 etapas de Weinstein basándose en SMA, Precio y Mansfield."""
@@ -14,16 +28,12 @@ def clasificar_historico(df):
     df['Etapa'] = "Indeterminado"
     for i in range(1, len(df)):
         act, ant = df.iloc[i], df.iloc[i-1]
-        # Etapa 2: Alcista (Precio > SMA, SMA subiendo, Mansfield > 0)
         if act['Close'] > act['SMA_30'] and act['SMA_30'] > ant['SMA_30'] and act['Mansfield'] > 0:
             df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 2 (Alcista)"
-        # Etapa 4: Bajista (Precio < SMA, SMA bajando, Mansfield < 0)
         elif act['Close'] < act['SMA_30'] and act['SMA_30'] < ant['SMA_30'] and act['Mansfield'] < 0:
             df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 4 (Bajista)"
-        # Etapa 1: Suelo (Precio > SMA pero sin momentum claro)
         elif act['Close'] > act['SMA_30']:
             df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 1 (Suelo)"
-        # Etapa 3: Techo (Fase de distribución)
         else:
             df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 3 (Techo)"
     return df
@@ -52,43 +62,141 @@ def mostrar_señal_weinstein(ticker, df):
 # --- 2. CONFIGURACIÓN DE LA INTERFAZ Y SIDEBAR ---
 st.set_page_config(page_title="Weinstein Pro Terminal Ultimate", layout="wide", page_icon="📈")
 
+# --- HACKS VISUALES PARA MEJORAR LA UX ---
+components.html("""
+    <script>
+        const doc = window.parent.document;
+
+        const traducciones = {
+            'No results': 'Ningún resultado',
+            'Zoom in': 'Acercar',
+            'Zoom out': 'Alejar',
+            'Pan': 'Navegar',
+            'Zoom': 'Zoom',
+            'Autoscale': 'Autoescala',
+            'Reset axes': 'Restablecer ejes',
+            'Box Select': 'Selección rectangular',
+            'Lasso Select': 'Selección lazo',
+            'Download plot as a PNG': 'Descargar como PNG'
+        };
+
+        const observer = new MutationObserver(() => {
+            // Traducir desplegables
+            const listItems = doc.querySelectorAll('li');
+            listItems.forEach(li => {
+                if (li.textContent.trim() === 'No results') {
+                    li.textContent = 'Ningún resultado';
+                }
+            });
+
+            // Traducir controles de Plotly
+            const plotlyControls = doc.querySelectorAll('.modebar-btn');
+            plotlyControls.forEach(btn => {
+                const textoIngles = btn.getAttribute('data-title');
+                if (traducciones[textoIngles]) {
+                    btn.setAttribute('data-title', traducciones[textoIngles]);
+                }
+            });
+        });
+
+        observer.observe(doc.body, { childList: true, subtree: true });
+    </script>
+""", height=0, width=0)
+st.markdown("""
+    <style>
+        [data-stale="true"] {
+            opacity: 1 !important;
+            filter: none !important;
+            transition: none !important;
+            pointer-events: auto !important;
+        }
+        div[data-testid="stStatusWidget"] {
+            visibility: hidden;
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 if 'mostrar_screener' not in st.session_state:
     st.session_state.mostrar_screener = False
 
+if 'last_error' not in st.session_state:
+    st.session_state.last_error = None
+
 st.sidebar.header("🕹️ Panel de Control")
-modo_analisis = st.sidebar.radio("Modo de Análisis:", ["Individual", "Comparativa Multiactivo"])
 
-ticker_1 = st.sidebar.text_input("Ticker Principal", value="AAPL").upper()
-ticker_2 = ""
-if modo_analisis == "Comparativa Multiactivo":
-    ticker_2 = st.sidebar.text_input("Ticker Comparativo", value="MSFT").upper()
+# --- Tu Contenedor Original ---
+with st.sidebar.container(border=True):
+    
+    modo_analisis = st.radio("Modo de Análisis:", ["Individual", "Comparativa Multiactivo"], index=0)
+    
+    st.markdown("### 📊 Selección de Activos")
+    
+    opciones_busqueda = ["✏️ Escribir otro Ticker..."] + TICKERS_SUGERIDOS
 
-temporalidad = st.sidebar.selectbox("Selecciona Temporalidad:", options=["1 Hora", "1 Día", "1 Semana"], index=2)
+    # Ticker 1
+    ticker_seleccionado = st.selectbox(
+        "Ticker Principal", 
+        options=opciones_busqueda, 
+        index=1, # Default a 'AAPL'
+        help="Busca en la lista o elige 'Escribir otro Ticker...' para introducir uno nuevo."
+    )
+    
+    if ticker_seleccionado == "✏️ Escribir otro Ticker...":
+        ticker_1 = st.text_input("Introduce el Ticker Principal manualmente:", value="").upper()
+    else:
+        ticker_1 = ticker_seleccionado
 
-# Limpieza de memoria si cambias de temporalidad para que no intente pintar gráficos viejos
-if 'last_temp' not in st.session_state:
-    st.session_state.last_temp = temporalidad
-if temporalidad != st.session_state.last_temp:
-    if 'df1' in st.session_state: del st.session_state.df1
-    if 'df2' in st.session_state: del st.session_state.df2
-    st.session_state.last_temp = temporalidad
+    # Ticker 2
+    ticker_2 = ""
+    if modo_analisis == "Comparativa Multiactivo":
+        ticker_2_seleccionado = st.selectbox(
+            "Ticker Comparativo", 
+            options=opciones_busqueda, 
+            index=2, # Default a 'MSFT'
+            help="Busca en la lista o elige 'Escribir otro Ticker...' para introducir uno nuevo."
+        )
+        
+        if ticker_2_seleccionado == "✏️ Escribir otro Ticker...":
+            ticker_2 = st.text_input("Introduce el Ticker Comparativo manualmente:", value="").upper()
+        else:
+            ticker_2 = ticker_2_seleccionado
 
-fecha_inicio_sel = st.sidebar.date_input("Fecha de inicio", value=pd.to_datetime("2020-01-01"))
+    st.markdown("---")
+    
+    opciones_temp = ["1 Hora", "1 Día", "1 Semana"]
+    temporalidad = st.selectbox("Selecciona Temporalidad:", options=opciones_temp, index=2) # Default a '1 Semana'
 
-# --- SECCIÓN CONDICIONAL: SENSIBILIDAD (Solo en modo Individual) ---
-sensibilidad_sma = 30 
-if modo_analisis == "Individual":
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🎯 Filtro de Sensibilidad")
-    sensibilidad_sma = st.sidebar.slider("Periodo Media Móvil (SMA)", min_value=10, max_value=100, value=30)
+    st.markdown("---")
+    st.markdown("### 📅 Periodo de Análisis")
+    fecha_inicio_sel = st.date_input("Fecha de inicio", value=pd.to_datetime("2020-01-01"), format="DD/MM/YYYY")
 
-boton_analizar = st.sidebar.button("🚀 Ejecutar Análisis")
-if boton_analizar:
-    st.session_state.mostrar_screener = False
+    fin_actualidad = st.checkbox("Fecha final: Actualidad (Hoy)", value=True)
+
+    if fin_actualidad:
+        fecha_fin_sel = pd.Timestamp.now().date()
+    else:
+        fecha_fin_sel = st.date_input("Fecha de fin", value=pd.Timestamp.now().date(), format="DD/MM/YYYY")
+
+    sensibilidad_sma = 30 
+    if modo_analisis == "Individual":
+        st.markdown("---")
+        st.markdown("### 🎯 Filtro de Sensibilidad")
+        sensibilidad_sma = st.slider("Periodo Media Móvil (SMA)", min_value=10, max_value=100, value=30)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    boton_analizar = st.button("🚀 Ejecutar Análisis", use_container_width=True, type="primary")
+
+    if temporalidad == "1 Hora":
+        limite_yahoo = pd.Timestamp.now().date() - pd.Timedelta(days=729)
+        if fecha_inicio_sel < limite_yahoo:
+            st.warning(f"⚠️ Aviso: Yahoo solo almacena datos de 1h desde {limite_yahoo.strftime('%d/%m/%Y')}.")
+
+# -----------------------------------------------------------
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🕵️ Vigilancia de Mercado")
-if st.sidebar.button("🔍 Escaneo Rápido Big Tech"):
+if st.sidebar.button("🔍 Escaneo Rápido Big Tech", use_container_width=True):
     from screener import ejecutar_escaneo
     tickers_fijos = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "META", "AMZN"]
     with st.sidebar:
@@ -100,31 +208,84 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🛠️ Configuración Visual")
 mostrar_sombreado = st.sidebar.toggle("Mostrar sombreado de etapas", value=True)
 
+# --- DICCIONARIOS DE PLOTLY EN ESPAÑOL ---
+CONFIG_ES_ZOOM = {
+    'scrollZoom': True,
+    'locale': 'es',
+    'locales': {
+        'es': {
+            'format': {
+                'months': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+                'shortMonths': ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+                'days': ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+                'shortDays': ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+            },
+            'toolbar': {
+                'download': 'Descargar gráfico como PNG',
+                'zoom': 'Zoom',
+                'zoomin': 'Acercar',
+                'zoomout': 'Alejar',
+                'Pan': 'Navegar',
+                'reset': 'Restablecer',
+                'select': 'Selección Lazo',
+                'box': 'Selección Rectangular',
+                'autoscale': 'Autoescala',
+                'resetscale': 'Restablecer ejes',
+                'togglehover': 'Alternar modo de cernido',
+                'togglespikelines': 'Alternar líneas guía'
+            }
+        }
+    }
+}
+CONFIG_ES_NO_ZOOM = dict(CONFIG_ES_ZOOM)
+CONFIG_ES_NO_ZOOM['scrollZoom'] = False
+
 # --- 3. LÓGICA DE PROCESAMIENTO ---
 if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar_screener):
     if boton_analizar:
+        
+        st.session_state.last_error = None
+        
+        if not ticker_1:
+            st.session_state.last_error = "⚠️ Por favor, introduce un ticker principal válido."
+            st.sidebar.error(st.session_state.last_error)
+            st.stop()
+            
+        if modo_analisis == "Comparativa Multiactivo" and not ticker_2:
+            st.session_state.last_error = "⚠️ Por favor, introduce un ticker comparativo válido."
+            st.sidebar.error(st.session_state.last_error)
+            st.stop()
+            
         map_int = {"1 Hora": "60m", "1 Día": "1d", "1 Semana": "1wk"}
         interval = map_int[temporalidad]
         
-        # Parche de seguridad para 1 Hora
         fecha_descarga = fecha_inicio_sel
+
         if interval == "60m":
             limite_yahoo = pd.Timestamp.now().date() - pd.Timedelta(days=729)
             if fecha_inicio_sel < limite_yahoo:
-                st.sidebar.warning(f"⚠️ Yahoo solo permite 2 años para 1h. Ajustado automáticamente.")
-                fecha_descarga = limite_yahoo
+                st.session_state.last_error = f"❌ Error de Rango: Para la temporalidad de '1 Hora', Yahoo Finance solo permite descargar datos de los últimos 2 años (desde el {limite_yahoo.strftime('%d/%m/%Y')}). Por favor, ajusta la Fecha de inicio."
+                st.error(st.session_state.last_error)
+                if 'df1' in st.session_state: del st.session_state.df1
+                if 'df2' in st.session_state: del st.session_state.df2
+                st.stop()
 
         with st.spinner(f'Descargando datos...'):
-            df1_raw = descargar_datos(ticker_1, str(fecha_descarga), "2026-01-01", interval=interval)
-            df_mkt_raw = descargar_datos("^GSPC", str(fecha_descarga), "2026-01-01", interval=interval)
-            df2_raw = descargar_datos(ticker_2, str(fecha_descarga), "2026-01-01", interval=interval) if ticker_2 else None
+            df1_raw = descargar_datos(ticker_1, str(fecha_descarga), str(fecha_fin_sel), interval=interval)
+            df_mkt_raw = descargar_datos("^GSPC", str(fecha_descarga), str(fecha_fin_sel), interval=interval)
+            df2_raw = descargar_datos(ticker_2, str(fecha_descarga), str(fecha_fin_sel), interval=interval) if ticker_2 else None
 
-        # Control de errores y parada en seco si no hay datos
         if df1_raw is None or df1_raw.empty:
-            st.error(f"❌ Error: El ticker '{ticker_1}' no es válido o no devuelve datos.")
+            st.session_state.last_error = f"❌ Error: El ticker '{ticker_1}' no es válido o no devuelve datos en este rango de fechas."
+            st.error(st.session_state.last_error)
+            if 'df1' in st.session_state: del st.session_state.df1
+            if 'df2' in st.session_state: del st.session_state.df2
             st.stop()
         if df_mkt_raw is None or df_mkt_raw.empty:
-            st.error("❌ Error al descargar datos de mercado (^GSPC). Revisa la conexión.")
+            st.session_state.last_error = "❌ Error al descargar datos de mercado (^GSPC). Revisa la conexión."
+            st.error(st.session_state.last_error)
+            if 'df1' in st.session_state: del st.session_state.df1
+            if 'df2' in st.session_state: del st.session_state.df2
             st.stop()
 
         if df1_raw is not None and not df1_raw.empty:
@@ -158,6 +319,9 @@ if st.session_state.mostrar_screener and 'df_screener_result' in st.session_stat
     except:
         st.dataframe(df_res, use_container_width=True)
 
+elif st.session_state.get('last_error'):
+    st.error(st.session_state.last_error)
+
 elif 'df1' in st.session_state:
     df1, t1, df2, t2 = st.session_state.df1, st.session_state.t1, st.session_state.get('df2'), st.session_state.get('t2')
     st.markdown(f"## {t1} {'vs ' + t2 if df2 is not None else ''} ({st.session_state.temp_label})")
@@ -189,7 +353,7 @@ elif 'df1' in st.session_state:
     st.markdown("---")
     cv1, cv2, cv3 = st.columns(3); ver_p = cv1.toggle("📉 Ver Gráfico de Precios", value=True); ver_m = cv2.toggle("📊 Ver Gráfico Mansfield", value=True); ver_r = cv3.toggle("🟪 Ver Gráfico RSI", value=True)
     
-    tab1, tab2, tab3 = st.tabs(["📊 Gráfico Interactivo", "📜 Datos y Validación", "📖 Metodología"])
+    tab1, tab2 = st.tabs(["📊 Gráfico Interactivo", "📜 Datos y Validación"])
 
     with tab1:
         paneles = sum([ver_p, ver_m, ver_r])
@@ -198,7 +362,9 @@ elif 'df1' in st.session_state:
             if ver_p: alturas.append(0.5 if paneles > 1 else 1.0)
             if ver_m: alturas.append(0.25 if paneles > 1 else 1.0)
             if ver_r: alturas.append(0.25 if paneles > 1 else 1.0)
-            fig = make_subplots(rows=paneles, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_width=alturas[::-1])
+            
+            fig = make_subplots(rows=paneles, cols=1, shared_xaxes=True, vertical_spacing=0.08, row_width=alturas[::-1])
+            
             f = 1
             if ver_p:
                 if df2 is None:
@@ -209,7 +375,6 @@ elif 'df1' in st.session_state:
                     fig.add_trace(go.Scatter(x=df2.index, y=df2['Close'], name=t2, line=dict(width=1.5, dash='dot')), row=f, col=1)
                 
                 if mostrar_sombreado:
-                    # OPTIMIZACIÓN CRÍTICA: Agrupar colores contiguos para no saturar al navegador en 1 Hora / 1 Día
                     start_idx = 1
                     current_color = ""
                     for i in range(1, len(df1)):
@@ -221,7 +386,6 @@ elif 'df1' in st.session_state:
                                 fig.add_vrect(x0=df1.index[start_idx-1], x1=df1.index[i-1], fillcolor=current_color, line_width=0, layer="below", row=f, col=1)
                             current_color = color
                             start_idx = i
-                    # Último bloque
                     if current_color != "":
                         fig.add_vrect(x0=df1.index[start_idx-1], x1=df1.index[-1], fillcolor=current_color, line_width=0, layer="below", row=f, col=1)
                 
@@ -238,9 +402,14 @@ elif 'df1' in st.session_state:
                     fig.add_hline(y=70, line_color="red", row=f, col=1); fig.add_hline(y=30, line_color="green", row=f, col=1)
             
             fig.update_layout(height=850, dragmode='pan', hovermode='x unified', margin=dict(t=30, b=30, l=50, r=50))
+            
+            fig.update_xaxes(showticklabels=True)
+            
             fig.update_xaxes(row=1, col=1, rangeslider_visible=False)
             fig.update_xaxes(row=paneles, col=1, rangeslider=dict(visible=True, thickness=0.02, bgcolor="rgba(128, 128, 128, 0.1)"))
-            fig.update_yaxes(fixedrange=False); st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
+            fig.update_yaxes(fixedrange=False)
+            
+            st.plotly_chart(fig, use_container_width=True, config=CONFIG_ES_ZOOM)
 
     with tab2:
         if df2 is None:
@@ -248,7 +417,10 @@ elif 'df1' in st.session_state:
             st.subheader("🧪 Validación Científica")
             c_b1, c_b2, c_b3, c_b4 = st.columns(4); c_b1.metric("Win Rate", f"{res['win_rate']:.1f}%"); c_b2.metric("Rent. Sistema", f"{res['total_ret']:.1f}%"); c_b3.metric("Rent. B&H", f"{res['bh_ret']:.1f}%"); c_b4.metric("Drawdown", f"{res['max_drawdown']:.1f}%")
             fig_eq = go.Figure(); fig_eq.add_trace(go.Scatter(x=res['equity_df']['Fecha'], y=res['equity_df']['Equity'], fill='tozeroy', line_color='green', name="Capital"))
-            fig_eq.update_layout(title="Curva de Equidad (Backtesting)", height=300); st.plotly_chart(fig_eq, use_container_width=True)
+            fig_eq.update_layout(title="Curva de Equidad (Backtesting)", height=300)
+            
+            st.plotly_chart(fig_eq, use_container_width=True, config=CONFIG_ES_NO_ZOOM)
+            
             pdf = generar_pdf(t1, st.session_state.temp_label, u1['Close'], u1['SMA_30'], u1['Mansfield'], u1['RSI'], obtener_texto_señal(t1, df1), res, st.session_state.current_sma)
             col_exp1, col_exp2 = st.columns(2); col_exp1.download_button(f"📄 PDF {t1}", pdf, f"{t1}.pdf"); col_exp2.download_button(f"📥 CSV {t1}", df1.to_csv().encode('utf-8'), f"{t1}.csv")
             st.dataframe(df1.style.format(precision=2), use_container_width=True)
@@ -256,27 +428,22 @@ elif 'df1' in st.session_state:
             col_a, col_b = st.columns(2)
             with col_a:
                 st.subheader(f"📊 {t1}"); res1 = ejecutar_backtest_desde_df(df1); fig_eq1 = go.Figure(); fig_eq1.add_trace(go.Scatter(x=res1['equity_df']['Fecha'], y=res1['equity_df']['Equity'], fill='tozeroy', line_color='green'))
-                fig_eq1.update_layout(title=f"Equidad {t1}", height=200); st.plotly_chart(fig_eq1, use_container_width=True)
+                fig_eq1.update_layout(title=f"Equidad {t1}", height=200)
+                
+                st.plotly_chart(fig_eq1, use_container_width=True, config=CONFIG_ES_NO_ZOOM)
+                
                 pdf1 = generar_pdf(t1, st.session_state.temp_label, df1.iloc[-1]['Close'], df1.iloc[-1]['SMA_30'], df1.iloc[-1]['Mansfield'], df1.iloc[-1]['RSI'], obtener_texto_señal(t1, df1), res1, st.session_state.current_sma)
                 st.download_button(f"📄 PDF {t1}", pdf1, f"{t1}.pdf"); st.download_button(f"📥 CSV {t1}", df1.to_csv().encode('utf-8'), f"{t1}.csv"); st.dataframe(df1.tail(30), use_container_width=True)
             with col_b:
                 st.subheader(f"📊 {t2}"); res2 = ejecutar_backtest_desde_df(df2); fig_eq2 = go.Figure(); fig_eq2.add_trace(go.Scatter(x=res2['equity_df']['Fecha'], y=res2['equity_df']['Equity'], fill='tozeroy', line_color='blue'))
-                fig_eq2.update_layout(title=f"Equidad {t2}", height=200); st.plotly_chart(fig_eq2, use_container_width=True)
+                fig_eq2.update_layout(title=f"Equidad {t2}", height=200)
+                
+                st.plotly_chart(fig_eq2, use_container_width=True, config=CONFIG_ES_NO_ZOOM)
+                
                 pdf2 = generar_pdf(t2, st.session_state.temp_label, df2.iloc[-1]['Close'], df2.iloc[-1]['SMA_30'], df2.iloc[-1]['Mansfield'], df2.iloc[-1]['RSI'], obtener_texto_señal(t2, df2), res2, st.session_state.current_sma)
                 st.download_button(f"📄 PDF {t2}", pdf2, f"{t2}.pdf"); st.download_button(f"📥 CSV {t2}", df2.to_csv().encode('utf-8'), f"{t2}.csv"); st.dataframe(df2.tail(30), use_container_width=True)
 
-    with tab3:
-        st.header("📖 Metodología de Stan Weinstein")
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.info("### 1️⃣ Etapa 1: Fase de Suelo\nConsolidación tras una caída. La Media 30 se aplana.")
-            st.success("### 2️⃣ Etapa 2: Fase Alcista\nEl precio rompe al alza con fuerza. **Momento óptimo de compra.**")
-        with col_m2:
-            st.warning("### 3️⃣ Etapa 3: Fase de Techo\nEl impulso se agota. El activo empieza a distribuir.")
-            st.error("### 4️⃣ Etapa 4: Fase Bajista\nCaída libre por debajo de la Media 30. **Evitar el activo.**")
-
 else:
-    st.image("https://images.unsplash.com/photo-1611974717537-48358a602217?q=80&w=2070&auto=format&fit=crop")
     st.info("👈 Configura los parámetros y pulsa 'Ejecutar Análisis'.")
     st.markdown("""
     ### Bienvenido a la Terminal de Análisis de Etapas
