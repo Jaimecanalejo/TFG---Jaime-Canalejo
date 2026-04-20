@@ -182,8 +182,44 @@ def generar_pdf(ticker, temp, precio, sma, mf, rsi, señal, backtest, sma_period
                  "Valores extremos pueden advertir de niveles de sobrecompra (por encima de 70) o sobreventa (por debajo de 30).")
     pdf.multi_cell(0, 5, texto_rsi)
     
-    # --- 4. INFOGRAFIA VISUAL ---
+    # --- 4. INFOGRAFIA VISUAL Y EXPLICACION DE ETAPAS ---
     pdf.draw_stage_diagram()
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 6, "Descripcion Detallada de las Etapas:", 0, 1)
+    pdf.ln(2)
+    
+    pdf.set_font('Arial', '', 9)
+    pdf.set_text_color(60, 60, 60)
+    
+    # Etapa 1
+    pdf.set_font('Arial', 'B', 9)
+    pdf.cell(0, 5, "1. Etapa 1 (Fase de Suelo):", 0, 1)
+    pdf.set_font('Arial', '', 9)
+    pdf.multi_cell(0, 4, "Consolidacion tras una caida previa. El precio oscila lateralmente y la Media Movil de 30 periodos comienza a aplanarse.")
+    pdf.ln(2)
+    
+    # Etapa 2
+    pdf.set_font('Arial', 'B', 9)
+    pdf.cell(0, 5, "2. Etapa 2 (Fase Alcista):", 0, 1)
+    pdf.set_font('Arial', '', 9)
+    pdf.multi_cell(0, 4, "El precio rompe al alza con fuerza por encima de la resistencia y de la Media Movil. Es el momento optimo para la compra.")
+    pdf.ln(2)
+    
+    # Etapa 3
+    pdf.set_font('Arial', 'B', 9)
+    pdf.cell(0, 5, "3. Etapa 3 (Fase de Techo):", 0, 1)
+    pdf.set_font('Arial', '', 9)
+    pdf.multi_cell(0, 4, "El impulso alcista se agota y el activo empieza a distribuir. La Media Movil pierde inclinacion y el precio la cruza frecuentemente.")
+    pdf.ln(2)
+    
+    # Etapa 4
+    pdf.set_font('Arial', 'B', 9)
+    pdf.cell(0, 5, "4. Etapa 4 (Fase Bajista):", 0, 1)
+    pdf.set_font('Arial', '', 9)
+    pdf.multi_cell(0, 4, "Caida libre del precio por debajo de la Media Movil de 30 periodos. Se debe evitar el activo o cerrar posiciones existentes.")
+    pdf.ln(4)
     
     # --- 5. BACKTESTING Y MÉTRICAS ---
     pdf.section_title("5. Estadisticas de Backtesting (Estrategia Etapa 2)")
