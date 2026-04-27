@@ -1,38 +1,71 @@
+import sqlite3
 import json
 import os
 
-DB_FILE = "users_db.json"
+DB_FILE = "users_db.sqlite"
 
-def cargar_db():
-    if not os.path.exists(DB_FILE):
-        return {}
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+def get_connection():
+    return sqlite3.connect(DB_FILE)
 
-def guardar_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+def init_db():
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            nombre TEXT PRIMARY KEY,
+            configuracion TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 def obtener_usuario(nombre):
-    db = cargar_db()
-    return db.get(nombre)
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT configuracion FROM usuarios WHERE nombre = ?", (nombre,))
+    row = c.fetchone()
+    conn.close()
+    
+    if row:
+        return json.loads(row[0])
+    return None
 
 def crear_usuario(nombre):
-    db = cargar_db()
-    if nombre in db:
+    usuario_existente = obtener_usuario(nombre)
+    if usuario_existente is not None:
         return False
-    # Valores por defecto para un nuevo usuario que coinciden EXACTAMENTE con app.py
-    db[nombre] = {
+        
+    valores_por_defecto = {
         "ticker_1": "AAPL",
         "ticker_2": "MSFT",
         "temporalidad": "1 Semana",
         "sensibilidad_sma": 30
     }
-    guardar_db(db)
+    
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO usuarios (nombre, configuracion)
+        VALUES (?, ?)
+    ''', (nombre, json.dumps(valores_por_defecto)))
+    conn.commit()
+    conn.close()
     return True
 
 def actualizar_usuario(nombre, ajustes):
-    db = cargar_db()
-    if nombre in db:
-        db[nombre].update(ajustes)
-        guardar_db(db)
+    usuario_actual = obtener_usuario(nombre)
+    if usuario_actual is not None:
+        usuario_actual.update(ajustes)
+        
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute('''
+            UPDATE usuarios 
+            SET configuracion = ? 
+            WHERE nombre = ?
+        ''', (json.dumps(usuario_actual), nombre))
+        conn.commit()
+        conn.close()
