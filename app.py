@@ -7,6 +7,7 @@ from data_loader import descargar_datos, preparar_datos_semanales
 from indicators import calcular_indicadores_individuales, calcular_fuerza_relativa
 from exporter import generar_pdf 
 from backtest_simple import ejecutar_backtest_desde_df 
+from user_session import obtener_usuario, crear_usuario, actualizar_usuario # <-- AÑADIR IMPORTACIÓN
 
 # --- LISTA DE TICKERS SUGERIDOS PARA BÚSQUEDA DINÁMICA ---
 TICKERS_SUGERIDOS = [
@@ -61,6 +62,42 @@ def mostrar_señal_weinstein(ticker, df):
 
 # --- 2. CONFIGURACIÓN DE LA INTERFAZ Y SIDEBAR ---
 st.set_page_config(page_title="Weinstein Pro Terminal Ultimate", layout="wide", page_icon="📈")
+
+# --- CONTROL DE USUARIOS ---
+if 'usuario_actual' not in st.session_state:
+    st.session_state.usuario_actual = None
+
+if not st.session_state.usuario_actual:
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("👋 Bienvenido")
+        modo_ingreso = st.radio("¿Qué deseas hacer?", ["Iniciar Sesión", "Soy Nuevo Usuario"])
+        
+        nombre_input = st.text_input("Nombre de Usuario").strip()
+        
+        if st.button("Acceder", type="primary", use_container_width=True):
+            if not nombre_input:
+                st.warning("Introduce un nombre.")
+            else:
+                if modo_ingreso == "Soy Nuevo Usuario":
+                    if crear_usuario(nombre_input):
+                        st.session_state.usuario_actual = nombre_input
+                        st.success("Usuario creado con éxito. Cargando entorno...")
+                        st.rerun()
+                    else:
+                        st.error("El usuario ya existe. Selecciona 'Iniciar Sesión'.")
+                else:
+                    perfil = obtener_usuario(nombre_input)
+                    if perfil:
+                        st.session_state.usuario_actual = nombre_input
+                        st.success(f"Bienvenido de nuevo, {nombre_input}!")
+                        st.rerun()
+                    else:
+                        st.error("Usuario no encontrado. Crea una cuenta nueva.")
+    st.stop() # Detiene la ejecución del resto de la app hasta loguearse
+
+# Cargar perfil del usuario actual
+perfil_usuario = obtener_usuario(st.session_state.usuario_actual)
 
 # --- HACKS VISUALES PARA MEJORAR LA UX ---
 components.html("""
@@ -125,67 +162,126 @@ if 'last_error' not in st.session_state:
 
 st.sidebar.header("🕹️ Panel de Control")
 
+st.sidebar.markdown(f"👤 **Usuario:** {st.session_state.usuario_actual}")
+if st.sidebar.button("Cerrar Sesión"):
+    # Limpiamos el usuario actual y los datos en memoria del análisis anterior
+    claves_a_borrar = ['usuario_actual', 'df1', 'df2', 't1', 't2', 'df_screener_result', 'mostrar_screener', 'last_error']
+    for clave in claves_a_borrar:
+        if clave in st.session_state:
+            del st.session_state[clave]
+    st.rerun()
+
 # --- Tu Contenedor Original ---
 with st.sidebar.container(border=True):
     
-    modo_analisis = st.radio("Modo de Análisis:", ["Individual", "Comparativa Multiactivo"], index=0)
+    opciones_modo = ["Individual", "Comparativa Multiactivo"]
+    modo_defecto = perfil_usuario.get('modo_analisis', 'Individual')
+    idx_modo = opciones_modo.index(modo_defecto) if modo_defecto in opciones_modo else 0
+    
+    modo_analisis = st.radio("Modo de Análisis:", opciones_modo, index=idx_modo)
     
     st.markdown("### 📊 Selección de Activos")
     
     opciones_busqueda = ["✏️ Escribir otro Ticker..."] + TICKERS_SUGERIDOS
 
+    # Determinar el índice por defecto según el perfil del usuario
+    ticker_1_defecto = perfil_usuario.get('ticker_1', 'AAPL')
+    try:
+        idx_t1 = opciones_busqueda.index(ticker_1_defecto)
+    except ValueError:
+        idx_t1 = 0 # Si puso uno manual
+
     # Ticker 1
     ticker_seleccionado = st.selectbox(
         "Ticker Principal", 
         options=opciones_busqueda, 
-        index=1, # Default a 'AAPL'
+        index=idx_t1,
         help="Busca en la lista o elige 'Escribir otro Ticker...' para introducir uno nuevo."
     )
     
     if ticker_seleccionado == "✏️ Escribir otro Ticker...":
-        ticker_1 = st.text_input("Introduce el Ticker Principal manualmente:", value="").upper()
+        ticker_1 = st.text_input("Introduce el Ticker Principal manualmente:", value=ticker_1_defecto if idx_t1 == 0 else "").upper()
     else:
         ticker_1 = ticker_seleccionado
 
     # Ticker 2
     ticker_2 = ""
+    ticker_2_defecto = perfil_usuario.get('ticker_2', 'MSFT')
+    try:
+        idx_t2 = opciones_busqueda.index(ticker_2_defecto)
+    except ValueError:
+        idx_t2 = 0
+
     if modo_analisis == "Comparativa Multiactivo":
         ticker_2_seleccionado = st.selectbox(
             "Ticker Comparativo", 
             options=opciones_busqueda, 
-            index=2, # Default a 'MSFT'
+            index=idx_t2,
             help="Busca en la lista o elige 'Escribir otro Ticker...' para introducir uno nuevo."
         )
         
         if ticker_2_seleccionado == "✏️ Escribir otro Ticker...":
-            ticker_2 = st.text_input("Introduce el Ticker Comparativo manualmente:", value="").upper()
+            ticker_2 = st.text_input("Introduce el Ticker Comparativo manualmente:", value=ticker_2_defecto if idx_t2 == 0 else "").upper()
         else:
             ticker_2 = ticker_2_seleccionado
 
     st.markdown("---")
     
     opciones_temp = ["1 Hora", "1 Día", "1 Semana"]
-    temporalidad = st.selectbox("Selecciona Temporalidad:", options=opciones_temp, index=2) # Default a '1 Semana'
+    temp_defecto = perfil_usuario.get('temporalidad', '1 Semana')
+    idx_temp = opciones_temp.index(temp_defecto) if temp_defecto in opciones_temp else 2
+
+    temporalidad = st.selectbox("Selecciona Temporalidad:", options=opciones_temp, index=idx_temp)
 
     st.markdown("---")
     st.markdown("### 📅 Periodo de Análisis")
-    fecha_inicio_sel = st.date_input("Fecha de inicio", value=pd.to_datetime("2020-01-01"), format="DD/MM/YYYY")
+    
+    # Cargar preferencias de fechas del usuario
+    fecha_inicio_str = perfil_usuario.get('fecha_inicio', "2020-01-01")
+    try:
+        inicio_defecto = pd.to_datetime(fecha_inicio_str).date()
+    except:
+        inicio_defecto = pd.to_datetime("2020-01-01").date()
 
-    fin_actualidad = st.checkbox("Fecha final: Actualidad (Hoy)", value=True)
+    fin_actualidad_defecto = perfil_usuario.get('fin_actualidad', True)
+    
+    fecha_fin_str = perfil_usuario.get('fecha_fin', str(pd.Timestamp.now().date()))
+    try:
+        fin_defecto = pd.to_datetime(fecha_fin_str).date()
+    except:
+        fin_defecto = pd.Timestamp.now().date()
+
+    # Inputs de fecha con los valores del usuario
+    fecha_inicio_sel = st.date_input("Fecha de inicio", value=inicio_defecto, format="DD/MM/YYYY")
+
+    fin_actualidad = st.checkbox("Fecha final: Actualidad (Hoy)", value=fin_actualidad_defecto)
 
     if fin_actualidad:
         fecha_fin_sel = pd.Timestamp.now().date()
     else:
-        fecha_fin_sel = st.date_input("Fecha de fin", value=pd.Timestamp.now().date(), format="DD/MM/YYYY")
+        fecha_fin_sel = st.date_input("Fecha de fin", value=fin_defecto, format="DD/MM/YYYY")
 
     sensibilidad_sma = 30 
     if modo_analisis == "Individual":
         st.markdown("---")
         st.markdown("### 🎯 Filtro de Sensibilidad")
-        sensibilidad_sma = st.slider("Periodo Media Móvil (SMA)", min_value=10, max_value=100, value=30)
+        sensibilidad_defecto = perfil_usuario.get('sensibilidad_sma', 30)
+        sensibilidad_sma = st.slider("Periodo Media Móvil (SMA)", min_value=10, max_value=100, value=sensibilidad_defecto)
 
     st.markdown("<br>", unsafe_allow_html=True)
     boton_analizar = st.button("🚀 Ejecutar Análisis", use_container_width=True, type="primary")
+
+    if boton_analizar: # Guardar preferencias al ejecutar análisis
+        actualizar_usuario(st.session_state.usuario_actual, {
+            "ticker_1": ticker_1,
+            "ticker_2": ticker_2 if ticker_2 else "MSFT",
+            "temporalidad": temporalidad,
+            "sensibilidad_sma": sensibilidad_sma,
+            "modo_analisis": modo_analisis,
+            "fecha_inicio": str(fecha_inicio_sel),
+            "fin_actualidad": fin_actualidad,
+            "fecha_fin": str(fecha_fin_sel)
+        })
 
     if temporalidad == "1 Hora":
         limite_yahoo = pd.Timestamp.now().date() - pd.Timedelta(days=729)
@@ -244,6 +340,7 @@ CONFIG_ES_NO_ZOOM['scrollZoom'] = False
 if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar_screener):
     if boton_analizar:
         
+        st.session_state.mostrar_screener = False 
         st.session_state.last_error = None
         
         if not ticker_1:
