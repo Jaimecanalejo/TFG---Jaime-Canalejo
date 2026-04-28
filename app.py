@@ -7,7 +7,7 @@ from data_loader import descargar_datos, preparar_datos_semanales
 from indicators import calcular_indicadores_individuales, calcular_fuerza_relativa
 from exporter import generar_pdf 
 from backtest_simple import ejecutar_backtest_desde_df 
-from user_session import obtener_usuario, crear_usuario, actualizar_usuario # <-- AÑADIR IMPORTACIÓN
+from user_session import obtener_usuario, crear_usuario, actualizar_usuario, verificar_login 
 
 # --- LISTA DE TICKERS SUGERIDOS PARA BÚSQUEDA DINÁMICA ---
 TICKERS_SUGERIDOS = [
@@ -74,26 +74,26 @@ if not st.session_state.usuario_actual:
         modo_ingreso = st.radio("¿Qué deseas hacer?", ["Iniciar Sesión", "Soy Nuevo Usuario"])
         
         nombre_input = st.text_input("Nombre de Usuario").strip()
+        pass_input = st.text_input("Contraseña", type="password").strip()
         
         if st.button("Acceder", type="primary", use_container_width=True):
-            if not nombre_input:
-                st.warning("Introduce un nombre.")
+            if not nombre_input or not pass_input:
+                st.warning("Introduce un nombre de usuario y una contraseña.")
             else:
                 if modo_ingreso == "Soy Nuevo Usuario":
-                    if crear_usuario(nombre_input):
+                    if crear_usuario(nombre_input, pass_input):
                         st.session_state.usuario_actual = nombre_input
                         st.success("Usuario creado con éxito. Cargando entorno...")
                         st.rerun()
                     else:
                         st.error("El usuario ya existe. Selecciona 'Iniciar Sesión'.")
                 else:
-                    perfil = obtener_usuario(nombre_input)
-                    if perfil:
+                    if verificar_login(nombre_input, pass_input):
                         st.session_state.usuario_actual = nombre_input
                         st.success(f"Bienvenido de nuevo, {nombre_input}!")
                         st.rerun()
                     else:
-                        st.error("Usuario no encontrado. Crea una cuenta nueva.")
+                        st.error("Usuario no encontrado o contraseña incorrecta. Si eres nuevo, crea una cuenta.")
     st.stop() # Detiene la ejecución del resto de la app hasta loguearse
 
 # Cargar perfil del usuario actual
