@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from data_loader import descargar_datos, preparar_datos_semanales
 from indicators import calcular_indicadores_individuales, calcular_fuerza_relativa
+from classifier import clasificar_historico
 from exporter import generar_pdf 
 from backtest_simple import ejecutar_backtest_desde_df 
 from user_session import obtener_usuario, crear_usuario, actualizar_usuario, verificar_login 
@@ -23,22 +24,6 @@ TICKERS_SUGERIDOS = [
 ]
 
 # --- 1. LÓGICA DE CLASIFICACIÓN DE ETAPAS (ALGORITMO WEINSTEIN) ---
-def clasificar_historico(df):
-    """Clasifica cada vela en una de las 4 etapas de Weinstein basándose en SMA, Precio y Mansfield."""
-    df = df.copy()
-    df['Etapa'] = "Indeterminado"
-    for i in range(1, len(df)):
-        act, ant = df.iloc[i], df.iloc[i-1]
-        if act['Close'] > act['SMA_30'] and act['SMA_30'] > ant['SMA_30'] and act['Mansfield'] > 0:
-            df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 2 (Alcista)"
-        elif act['Close'] < act['SMA_30'] and act['SMA_30'] < ant['SMA_30'] and act['Mansfield'] < 0:
-            df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 4 (Bajista)"
-        elif act['Close'] > act['SMA_30']:
-            df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 1 (Suelo)"
-        else:
-            df.iat[i, df.columns.get_loc('Etapa')] = "Etapa 3 (Techo)"
-    return df
-
 def obtener_texto_señal(ticker, df):
     """Genera el dictamen técnico basado en indicadores actuales."""
     ultima = df.iloc[-1]
@@ -171,7 +156,6 @@ if st.sidebar.button("Cerrar Sesión"):
             del st.session_state[clave]
     st.rerun()
 
-# --- Tu Contenedor Original ---
 with st.sidebar.container(border=True):
     
     opciones_modo = ["Individual", "Comparativa Multiactivo"]
@@ -305,7 +289,7 @@ st.sidebar.markdown("### 🛠️ Configuración Visual")
 mostrar_sombreado = st.sidebar.toggle("Mostrar sombreado de etapas", value=True)
 
 # --- DICCIONARIOS DE PLOTLY EN ESPAÑOL ---
-CONFIG_ES_ZOOM = {
+CONFIG_FECHAS = {
     'scrollZoom': True,
     'locale': 'es',
     'locales': {
@@ -315,25 +299,11 @@ CONFIG_ES_ZOOM = {
                 'shortMonths': ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
                 'days': ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
                 'shortDays': ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
-            },
-            'toolbar': {
-                'download': 'Descargar gráfico como PNG',
-                'zoom': 'Zoom',
-                'zoomin': 'Acercar',
-                'zoomout': 'Alejar',
-                'Pan': 'Navegar',
-                'reset': 'Restablecer',
-                'select': 'Selección Lazo',
-                'box': 'Selección Rectangular',
-                'autoscale': 'Autoescala',
-                'resetscale': 'Restablecer ejes',
-                'togglehover': 'Alternar modo de cernido',
-                'togglespikelines': 'Alternar líneas guía'
             }
         }
     }
 }
-CONFIG_ES_NO_ZOOM = dict(CONFIG_ES_ZOOM)
+CONFIG_ES_NO_ZOOM = dict(CONFIG_FECHAS)
 CONFIG_ES_NO_ZOOM['scrollZoom'] = False
 
 # --- 3. LÓGICA DE PROCESAMIENTO ---
@@ -506,7 +476,7 @@ elif 'df1' in st.session_state:
             fig.update_xaxes(row=paneles, col=1, rangeslider=dict(visible=True, thickness=0.02, bgcolor="rgba(128, 128, 128, 0.1)"))
             fig.update_yaxes(fixedrange=False)
             
-            st.plotly_chart(fig, use_container_width=True, config=CONFIG_ES_ZOOM)
+            st.plotly_chart(fig, use_container_width=True, config=CONFIG_FECHAS)
 
     with tab2:
         if df2 is None:
