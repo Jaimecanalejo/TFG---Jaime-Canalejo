@@ -1,0 +1,17 @@
+# Entorno virtual y bytecode de Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Cachés y datos generados localmente
+data_cache/
+*.sqlite
+*.sqlite3
+
+# Configuración local y secretos
+.env
+.streamlit/secrets.toml
+
+# Archivos de ejecución locales
+*.log
