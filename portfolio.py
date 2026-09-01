@@ -17,7 +17,7 @@ def simular_cartera(lista_tickers, inicio, fin, interval, sensibilidad_sma, prog
     capital_por_activo = float(capital_inicial) / len(valid_tickers)
 
     if progress_callback:
-        progress_callback("Descargando índice de referencia (^GSPC)...")
+        progress_callback("Preparando índice de referencia (^GSPC)", 0, len(valid_tickers))
         
     df_mkt_raw = descargar_datos("^GSPC", inicio, fin, interval=interval)
     if df_mkt_raw is None or df_mkt_raw.empty:
@@ -28,9 +28,9 @@ def simular_cartera(lista_tickers, inicio, fin, interval, sensibilidad_sma, prog
     resultados_tickers = {}
     equity_dfs = []
     
-    for ticker in valid_tickers:
+    for idx, ticker in enumerate(valid_tickers):
         if progress_callback:
-            progress_callback(f"Descargando y analizando {ticker}...")
+            progress_callback(f"Analizando {ticker}", idx + 1, len(valid_tickers))
             
         df_raw = descargar_datos(ticker, inicio, fin, interval=interval)
         if df_raw is None or df_raw.empty:
@@ -149,7 +149,7 @@ def optimizar_y_simular_cartera(lista_candidatos, top_n=3, inicio="2020-01-01", 
         raise ValueError("No se especificaron activos candidatos válidos para la optimización.")
 
     if progress_callback:
-        progress_callback("Descargando índice de referencia (^GSPC)...")
+        progress_callback("Preparando índice de referencia (^GSPC)", 0, len(valid_candidates))
         
     df_mkt_raw = descargar_datos("^GSPC", inicio, fin, interval=interval)
     if df_mkt_raw is None or df_mkt_raw.empty:
@@ -162,7 +162,7 @@ def optimizar_y_simular_cartera(lista_candidatos, top_n=3, inicio="2020-01-01", 
     # 1. Evaluación cuantitativa previa de cada candidato
     for idx, ticker in enumerate(valid_candidates):
         if progress_callback:
-            progress_callback(f"Evaluando backtesting cuantitativo de {ticker} ({idx+1}/{len(valid_candidates)})...")
+            progress_callback(f"Evaluando {ticker}", idx + 1, len(valid_candidates))
             
         df_raw = descargar_datos(ticker, inicio, fin, interval=interval)
         if df_raw is None or df_raw.empty:
@@ -230,7 +230,7 @@ def optimizar_y_simular_cartera(lista_candidatos, top_n=3, inicio="2020-01-01", 
     eval_df = eval_df[['Estado', 'Activo', 'Score', 'Rent. Sistema', 'Alfa vs B&H', 'Rent. B&H', 'Win Rate', 'Max Drawdown', 'Operaciones', 'Dictamen de Reasignación']]
     
     if progress_callback:
-        progress_callback(f"Construyendo cartera optimizada con Top {top_n_actual} activos: {', '.join(selected_tickers)}...")
+        progress_callback(f"Selección completada: {', '.join(selected_tickers)}", len(valid_candidates), len(valid_candidates))
         
     # 2. Ejecutar la simulación de cartera con los activos seleccionados
     res_cartera = simular_cartera(

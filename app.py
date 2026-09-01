@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import os
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -11,6 +12,7 @@ from backtest_simple import ejecutar_backtest_desde_df
 from user_session import obtener_usuario, crear_usuario, actualizar_usuario, verificar_login 
 from portfolio import simular_cartera, optimizar_y_simular_cartera
 from screener import ejecutar_escaneo, filtrar_candidatos_alta_beta
+from rsi_analysis import analizar_cruces_rsi, firma_analisis_rsi, generar_comentario_ia, generar_comentario_local
 
 # --- LISTA DE TICKERS SUGERIDOS PARA BÚSQUEDA DINÁMICA ---
 TICKERS_SUGERIDOS = [
@@ -46,6 +48,52 @@ def mostrar_señal_weinstein(ticker, df):
         st.error(f"🚨 {texto}: {ticker}")
     else:
         st.warning(f"⚖️ {ticker}: {texto}")
+
+
+def obtener_configuracion_openai():
+    """Lee la configuración sin exponer secretos ni exigirlos para usar la app."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    modelo = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY", api_key)
+        modelo = st.secrets.get("OPENAI_MODEL", modelo)
+    except (FileNotFoundError, KeyError):
+        pass
+    return api_key, modelo
+
+
+def mostrar_analisis_rsi(ticker, analisis):
+    """Renderiza métricas y comentario RSI aislados para un único activo."""
+    st.markdown(f"#### Lectura RSI · {ticker}")
+    col_compra, col_venta, col_actual = st.columns(3)
+    col_compra.metric("Entradas en compra (<30)", analisis["cruces_compra"])
+    col_venta.metric("Entradas en venta (>70)", analisis["cruces_venta"])
+    rsi_actual = analisis["rsi_actual"]
+    col_actual.metric("RSI actual", "—" if rsi_actual is None else f"{rsi_actual:.2f}")
+    st.caption(
+        "Se cuenta una entrada cuando el RSI cruza desde fuera hacia la zona de "
+        "sobreventa (<30) o sobrecompra (>70); permanecer dentro no suma cruces nuevos."
+    )
+    st.info(generar_comentario_local(ticker, analisis), icon="📊")
+
+    api_key, modelo = obtener_configuracion_openai()
+    if not api_key:
+        st.caption("Comentario de IA no disponible: configura OPENAI_API_KEY en los secretos de Streamlit.")
+        return
+
+    firma = firma_analisis_rsi(ticker, analisis)
+    cache = st.session_state.setdefault("comentarios_ia_rsi", {})
+    if firma in cache:
+        st.success(cache[firma], icon="✨")
+        return
+
+    if st.button(f"✨ Generar comentario con IA para {ticker}", key=f"generar_ia_rsi_{firma}", use_container_width=True):
+        try:
+            with st.spinner(f"Interpretando los cruces RSI de {ticker}..."):
+                cache[firma] = generar_comentario_ia(ticker, analisis, api_key, modelo)
+            st.success(cache[firma], icon="✨")
+        except Exception as exc:
+            st.error(f"No se pudo generar el comentario de IA para {ticker}: {exc}")
 
 # --- 2. CONFIGURACIÓN DE LA INTERFAZ Y SIDEBAR ---
 st.set_page_config(page_title="Weinstein Pro | Quant Terminal", layout="wide", page_icon="📈")
@@ -310,7 +358,7 @@ st.sidebar.markdown(
 )
 if st.sidebar.button("Salir"):
     # Limpiamos el usuario actual y los datos en memoria del análisis anterior
-    claves_a_borrar = ['usuario_actual', 'df1', 'df2', 't1', 't2', 'df_screener_result', 'mostrar_screener', 'last_error', 'res_portfolio', 'last_portfolio_error', 'modo_analisis_selector']
+    claves_a_borrar = ['usuario_actual', 'df1', 'df2', 't1', 't2', 'df_screener_result', 'mostrar_screener', 'last_error', 'res_portfolio', 'last_portfolio_error', 'modo_analisis_selector', 'comentarios_ia_rsi']
     for clave in claves_a_borrar:
         if clave in st.session_state:
             del st.session_state[clave]
@@ -772,8 +820,17 @@ if modo_analisis == "Simulador de Cartera" and not st.session_state.mostrar_scre
                 msg_toast = "⏳ Evaluando candidatos y optimizando cartera..." if es_auto else "⏳ Iniciando simulación de portafolio..."
                 st.toast(msg_toast, icon="💼")
                 with st.status("Ejecutando simulador de cartera...", expanded=True) as status:
-                    def update_progress(msg):
-                        status.write(msg)
+                    progreso_cartera = st.progress(0, text="Preparando análisis...")
+
+                    def update_progress(msg, actual=None, total=None):
+                        if actual is not None and total:
+                            texto = f"{actual}/{total} · {msg}"
+                            progreso_cartera.progress(min(actual / total, 1.0), text=texto)
+                        else:
+                            texto = msg
+                            progreso_cartera.progress(0, text=texto)
+                        # Actualizar la misma etiqueta evita añadir una línea por activo.
+                        status.update(label=texto, state="running", expanded=True)
                         
                     if es_auto:
                         # Fase 1: Screener automático — filtra el universo por criterios de calidad Weinstein
@@ -934,6 +991,8 @@ elif st.session_state.get('last_error'):
 
 elif 'df1' in st.session_state:
     df1, t1, df2, t2 = st.session_state.df1, st.session_state.t1, st.session_state.get('df2'), st.session_state.get('t2')
+    analisis_rsi_1 = analizar_cruces_rsi(df1)
+    analisis_rsi_2 = analizar_cruces_rsi(df2) if df2 is not None else None
     st.markdown(f"## {t1} {'vs ' + t2 if df2 is not None else ''} ({st.session_state.temp_label})")
     
     u1 = df1.iloc[-1]
@@ -1056,8 +1115,36 @@ elif 'df1' in st.session_state:
                 f += 1
             if ver_r:
                 fig.add_trace(go.Scatter(x=df1.index, y=df1['RSI'], name=f"RSI {t1}", line=dict(color='#7c3aed', width=2)), row=f, col=1)
+                fechas_compra_1 = analisis_rsi_1["fechas_compra"]
+                fechas_venta_1 = analisis_rsi_1["fechas_venta"]
+                fig.add_trace(go.Scatter(
+                    x=fechas_compra_1, y=df1.loc[fechas_compra_1, 'RSI'], mode='markers',
+                    marker=dict(color='#059669', size=9, symbol='triangle-up'),
+                    name=f"Entrada RSI compra · {t1}",
+                    hovertemplate=f"<b>{t1} · Entrada en sobreventa</b><br>%{{x|%d %b %Y}}<br>RSI %{{y:.2f}}<extra></extra>"
+                ), row=f, col=1)
+                fig.add_trace(go.Scatter(
+                    x=fechas_venta_1, y=df1.loc[fechas_venta_1, 'RSI'], mode='markers',
+                    marker=dict(color='#dc2626', size=9, symbol='triangle-down'),
+                    name=f"Entrada RSI venta · {t1}",
+                    hovertemplate=f"<b>{t1} · Entrada en sobrecompra</b><br>%{{x|%d %b %Y}}<br>RSI %{{y:.2f}}<extra></extra>"
+                ), row=f, col=1)
                 if df2 is not None:
                     fig.add_trace(go.Scatter(x=df2.index, y=df2['RSI'], name=f"RSI {t2}", line=dict(dash='dot', color='#ec4899', width=2)), row=f, col=1)
+                    fechas_compra_2 = analisis_rsi_2["fechas_compra"]
+                    fechas_venta_2 = analisis_rsi_2["fechas_venta"]
+                    fig.add_trace(go.Scatter(
+                        x=fechas_compra_2, y=df2.loc[fechas_compra_2, 'RSI'], mode='markers',
+                        marker=dict(color='#10b981', size=8, symbol='diamond'),
+                        name=f"Entrada RSI compra · {t2}",
+                        hovertemplate=f"<b>{t2} · Entrada en sobreventa</b><br>%{{x|%d %b %Y}}<br>RSI %{{y:.2f}}<extra></extra>"
+                    ), row=f, col=1)
+                    fig.add_trace(go.Scatter(
+                        x=fechas_venta_2, y=df2.loc[fechas_venta_2, 'RSI'], mode='markers',
+                        marker=dict(color='#f43f5e', size=8, symbol='diamond'),
+                        name=f"Entrada RSI venta · {t2}",
+                        hovertemplate=f"<b>{t2} · Entrada en sobrecompra</b><br>%{{x|%d %b %Y}}<br>RSI %{{y:.2f}}<extra></extra>"
+                    ), row=f, col=1)
                 fig.add_hrect(y0=70, y1=100, fillcolor='rgba(239,68,68,.055)', line_width=0, layer='below', row=f, col=1)
                 fig.add_hrect(y0=0, y1=30, fillcolor='rgba(16,185,129,.055)', line_width=0, layer='below', row=f, col=1)
                 fig.add_hline(y=70, line_dash='dash', line_color='#f87171', line_width=1, row=f, col=1)
@@ -1087,6 +1174,17 @@ elif 'df1' in st.session_state:
                 fig, use_container_width=True, config=CONFIG_FECHAS,
                 theme=None, key=f"grafico_tecnico_{t1}_{t2 or 'individual'}"
             )
+
+            if ver_r:
+                st.markdown("### Análisis de cruces RSI")
+                if df2 is None:
+                    mostrar_analisis_rsi(t1, analisis_rsi_1)
+                else:
+                    col_rsi_1, col_rsi_2 = st.columns(2)
+                    with col_rsi_1:
+                        mostrar_analisis_rsi(t1, analisis_rsi_1)
+                    with col_rsi_2:
+                        mostrar_analisis_rsi(t2, analisis_rsi_2)
 
     with tab2:
         if df2 is None:
