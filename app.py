@@ -125,12 +125,21 @@ st.markdown("""
         min-height: 2.15rem; border-radius: 8px; border: 1px solid var(--border);
         padding-top:.3rem; padding-bottom:.3rem; font-size:.8rem;
         font-weight: 650; box-shadow: 0 1px 2px rgba(15,23,42,.04);
-        transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+        background:#ffffff; color:#1e293b;
+        transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background-color .15s ease, color .15s ease;
     }
+    .stButton > button p, .stDownloadButton > button p { color:inherit !important; }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        border-color:#93c5fd; transform:translateY(-1px); box-shadow:0 7px 18px rgba(15,23,42,.08);
+        background:#eff6ff; color:#1d4ed8; border-color:#60a5fa;
+        transform:translateY(-1px); box-shadow:0 7px 18px rgba(15,23,42,.08);
     }
+    .stButton > button:active, .stDownloadButton > button:active { transform:translateY(0); background:#dbeafe; }
     .stButton > button[kind="primary"] { background:linear-gradient(135deg,var(--primary),var(--primary-dark)); border:0; color:white; }
+    .stButton > button[kind="primary"]:hover { background:linear-gradient(135deg,#1d4ed8,#1e40af); color:white; }
+    .stButton > button:disabled, .stDownloadButton > button:disabled {
+        background:#e2e8f0 !important; color:#94a3b8 !important; border-color:#cbd5e1 !important;
+        box-shadow:none !important; cursor:not-allowed !important; transform:none !important; opacity:1 !important;
+    }
     [data-testid="stSidebar"] .stButton > button {
         background:#162238; color:#dbeafe; border-color:#2a3850; box-shadow:none;
         justify-content:flex-start; min-height:1.8rem; padding:.12rem .48rem;
@@ -138,6 +147,9 @@ st.markdown("""
     }
     [data-testid="stSidebar"] .stButton > button:hover { background:#1d2b44; border-color:#3b82f6; color:white; }
     [data-testid="stSidebar"] .stButton > button[kind="primary"] { justify-content:center; background:linear-gradient(135deg,#2563eb,#4f46e5); border:0; }
+    [data-testid="stSidebar"] .stButton > button:disabled {
+        background:#111827 !important; color:#64748b !important; border-color:#1f2937 !important;
+    }
     [data-testid="stSidebar"] div[role="radiogroup"] { gap:.25rem; }
     [data-testid="stSidebar"] div[role="radiogroup"] label {
         width:100%; min-height:2rem; display:flex; align-items:center;
@@ -298,7 +310,7 @@ st.sidebar.markdown(
 )
 if st.sidebar.button("Salir"):
     # Limpiamos el usuario actual y los datos en memoria del análisis anterior
-    claves_a_borrar = ['usuario_actual', 'df1', 'df2', 't1', 't2', 'df_screener_result', 'mostrar_screener', 'last_error', 'res_portfolio', 'last_portfolio_error']
+    claves_a_borrar = ['usuario_actual', 'df1', 'df2', 't1', 't2', 'df_screener_result', 'mostrar_screener', 'last_error', 'res_portfolio', 'last_portfolio_error', 'modo_analisis_selector']
     for clave in claves_a_borrar:
         if clave in st.session_state:
             del st.session_state[clave]
@@ -315,9 +327,14 @@ with st.sidebar.container(border=True):
         "Comparativa Multiactivo": "Comparativa",
         "Simulador de Cartera": "Cartera",
     }
+    def cerrar_screener_al_cambiar_modo():
+        st.session_state.mostrar_screener = False
+
     modo_analisis = st.radio(
         "Modo de Análisis", opciones_modo, index=idx_modo,
-        format_func=lambda modo: etiquetas_modo[modo]
+        format_func=lambda modo: etiquetas_modo[modo],
+        on_change=cerrar_screener_al_cambiar_modo,
+        key="modo_analisis_selector"
     )
     
     ticker_1 = ""
@@ -437,13 +454,16 @@ with st.sidebar.container(border=True):
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🕵️ Vigilancia")
-if st.sidebar.button("🔍 Escanear Big Tech", use_container_width=True):
-    from screener import ejecutar_escaneo
-    tickers_fijos = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "META", "AMZN"]
-    with st.sidebar:
-        with st.spinner("Escaneando..."):
-            st.session_state.df_screener_result = ejecutar_escaneo(tickers_fijos, sensibilidad_sma)
-            st.session_state.mostrar_screener = True 
+etiqueta_screener = "← Volver al análisis" if st.session_state.mostrar_screener else "🔍 Escanear Big Tech"
+if st.sidebar.button(etiqueta_screener, use_container_width=True, type="primary"):
+    if st.session_state.mostrar_screener:
+        st.session_state.mostrar_screener = False
+    else:
+        tickers_fijos = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "META", "AMZN"]
+        with st.sidebar:
+            with st.spinner("Escaneando..."):
+                st.session_state.df_screener_result = ejecutar_escaneo(tickers_fijos, sensibilidad_sma)
+                st.session_state.mostrar_screener = True
 
 mostrar_sombreado = False
 
@@ -596,7 +616,9 @@ if boton_analizar or ('df1' in st.session_state and not st.session_state.mostrar
         mostrar_sombreado = False
 
 # --- 4. RENDERIZADO ---
-if modo_analisis == "Simulador de Cartera":
+# El escáner es una vista independiente. Si está activo debe tener prioridad
+# sobre el modo de análisis seleccionado (incluido el simulador de cartera).
+if modo_analisis == "Simulador de Cartera" and not st.session_state.mostrar_screener:
     st.markdown("# 💼 Simulador y Optimizador de Cartera Cuantitativo")
     st.markdown("""
     Este módulo evalúa automáticamente activos candidatos mediante backtesting cuantitativo,
